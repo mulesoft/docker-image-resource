@@ -1,0 +1,4 @@
+product: corepaas
+component: concourse
+asset: docker-resource
+strategy: docker
