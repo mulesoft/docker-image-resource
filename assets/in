@@ -29,9 +29,9 @@ registry_mirror=$(jq -r '.source.registry_mirror // ""' < $payload)
 username=$(jq -r '.source.username // ""' < $payload)
 password=$(jq -r '.source.password // ""' < $payload)
 repository="$(jq -r '.source.repository // ""' < $payload)"
-username2=$(jq -r '.source.logins.username // ""' < $payload)
-password2=$(jq -r '.source.logins.password // ""' < $payload)
-registry2="$(jq -r '.source.logins.registry // ""' < $payload)"
+username2=$(jq -r '.source.additional_login.username // ""' < $payload)
+password2=$(jq -r '.source.additional_login.password // ""' < $payload)
+registry2="$(jq -r '.source.additional_login.registry // ""' < $payload)"
 tag="$(jq -r '.source.tag // "latest"' < $payload)"
 ca_certs=$(jq -r '.source.ca_certs // []' < $payload)
 client_certs=$(jq -r '.source.client_certs // []' < $payload)
@@ -61,10 +61,7 @@ image_name="${repository}@${digest}"
 
 if [ "$skip_download" = "false" ]; then
   log_in "$username" "$password" "$registry"
-  set +x
-  echo "trying to login dude"
   log_in "$username2" "$password2" "$registry2"
-  set -x
   docker_pull "$image_name"
 
   if [ "$save" = "true" ]; then
