@@ -31,6 +31,9 @@ registry_mirror=$(jq -r '.source.registry_mirror // ""' < $payload)
 username=$(jq -r '.source.username // ""' < $payload)
 password=$(jq -r '.source.password // ""' < $payload)
 repository=$(jq -r '.source.repository // ""' < $payload)
+username2=$(jq -r '.source.additional_login.username // ""' < $payload)
+password2=$(jq -r '.source.additional_login.password // ""' < $payload)
+registry2="$(jq -r '.source.additional_login.registry // ""' < $payload)"
 ca_certs=$(jq -r '.source.ca_certs // []' < $payload)
 client_certs=$(jq -r '.source.client_certs // []' < $payload)
 
@@ -47,6 +50,7 @@ certs_to_file "$ca_certs"
 set_client_certs "$client_certs"
 start_docker "$insecure_registries" "$registry_mirror"
 log_in "$username" "$password" "$registry"
+log_in "$username2" "$password2" "$registry2"
 
 tag_source=$(jq -r '.source.tag // "latest"' < $payload)
 tag_params=$(jq -r '.params.tag // ""' < $payload)
