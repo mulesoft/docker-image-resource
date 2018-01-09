@@ -1,8 +1,6 @@
-# Docker Image Resource
+# Docker Image Resource NG
 
-Tracks and builds [Docker](https://docker.io) images.
-
-Note: docker registry must be [v2](https://docs.docker.com/registry/spec/api/).
+Concourse resource to pull, build and push [Docker](https://docker.io) images
 
 ## Source Configuration
 
@@ -17,6 +15,16 @@ Note: docker registry must be [v2](https://docs.docker.com/registry/spec/api/).
 * `username`: *Optional.* The username to authenticate with when pushing.
 
 * `password`: *Optional.* The password to use when authenticating.
+
+* `login`: *Optional.* An array of additional username, password and registry
+  to log in, following this format:
+
+  ```yaml
+  login:
+  - username: USERNAME
+    password: PASSWORD
+    registry: REGISTRY # (optional)
+  ```
 
 * `aws_access_key_id`: *Optional.* AWS access key to use for acquiring ECR
   credentials.
@@ -141,16 +149,18 @@ version is the image's digest.
 * `dockerfile`: *Optional.* The path of the `Dockerfile` in the directory if
   it's not at the root of the directory.
 
-* `cache`: *Optional.* Default `false`. When the `build` parameter is set,
+* `cache`: *Optional.* Default `true`. When the `build` parameter is set,
   first pull `image:tag` from the Docker registry (so as to use cached
-  intermediate images when building). This will cause the resource to fail
-  if it is set to `true` and the image does not exist yet.
-  
+  intermediate images when building). If no image can be pulled, the **build continues without a cache image**.
+
 * `cache_tag`: *Optional.* Default `tag`. The specific tag to pull before
   building when `cache` parameter is set. Instead of pulling the same tag
   that's going to be built, this allows picking a different tag like
   `latest` or the previous version. This will cause the resource to fail
   if it is set to a tag that does not exist yet.
+
+* `cache_repository`: *Optional.* If your cache image is not in the same registry as the one to build, set it here.
+   Defaults to the registry of the image you build
 
 * `load_base`: *Optional.* A path to a directory containing an image to `docker
   load` before running `docker build`. The directory must have `image`,
@@ -165,14 +175,10 @@ version is the image's digest.
 
 * `import_file`: *Optional.* A path to a file to `docker import` and then push.
 
-* `pull_repository`: *Optional.* **DEPRECATED. Use `get` and `load` instead.** A
-  path to a repository to pull down, and then push to this resource.
-
-* `pull_tag`: *Optional.*  **DEPRECATED. Use `get` and `load` instead.** Default
-  `latest`. The tag of the repository to pull down via `pull_repository`.
-
-* `tag`: *Optional.* The value should be a path to a file containing the name
+* `tag`: *Optional.* The value should be a **path to a file** containing the name
   of the tag.
+  
+* `tag_static`: *Optional.* use this to set a tag using a usual value be it using *((myvar))* or just a static string
 
 * `tag_prefix`: *Optional.* If specified, the tag read from the file will be
   prepended with this string. This is useful for adding `v` in front of version
@@ -182,7 +188,7 @@ version is the image's digest.
   be tagged as `latest` in addition to whatever other tag was specified.
 
 * `build_args`: *Optional.*  A map of Docker build arguments.
-  
+
   Example:
 
   ```yaml
@@ -191,7 +197,7 @@ version is the image's digest.
     how_many_things: 2
     email: me@yopmail.com
   ```
-    
+
 * `build_args_file`: *Optional.* Path to a JSON file containing Docker build
   arguments.
 
@@ -201,35 +207,70 @@ version is the image's digest.
     { "email": "me@yopmail.com", "how_many_things": 1, "do_thing": false }
     ```            
 
+## resource_type configuration
+
+Since this is a custom resource, you need to register it, so your jobs can use it.
+Place this somewheren in your `pipeline.yml`
+
+```yaml
+resource_types:
+- name:                          docker-image-resource-ng
+  type:                          docker-image
+  privileged:                    true
+  source:
+    repository:                  eugenmayer/concourse-docker-image-resource
+    tag:                         latest
+```
 
 ## Example
 
 ``` yaml
-resources:
-- name: git-resource
-  type: git
-  source: # ...
-
-- name: git-resource-image
-  type: docker-image
-  source:
-    repository: concourse/git-resource
-    username: username
-    password: password
-
-- name: git-resource-rootfs
-  type: s3
-  source: # ...
-
 jobs:
 - name: build-rootfs
   plan:
-  - get: git-resource
-  - put: git-resource-image
-    params: {build: git-resource}
-    get_params: {rootfs: true}
-  - put: git-resource-rootfs
-    params: {file: git-resource-image/rootfs.tar}
+  - get: alpine-base-image
+    # if our base image, so the one we FROM for, has an update, rebuild us
+    trigger: true
+    params:
+      skip_download: true
+  - get: docker-java-image-scm
+    # if the dockerfile changes, trigger a rebuild
+    trigger: true
+    # this will trigger the build and push 
+  - put: docker-java-image
+    params:
+      build: docker-java-image-scm
+
+resources:
+- name: docker-java-image-scm
+  type: git
+  source: 
+    uri: eugenmayer/docker-java-image
+
+- name: alpine-base-image
+  # thats the important one
+  type: docker-image-resource-ng
+  source:
+    repository: alpine
+    tag: edge
+    
+- name: docker-java-image
+  # thats the important one
+  type: docker-image-resource-ng
+  source:
+    repository: eugenmayer/java
+    username: eugenmayer
+    password: secretdockerhubpassword
+    tag: jre8
+
+
+resource_types:    
+- name:                          docker-image-resource-ng
+  type:                          docker-image
+  privileged:                    true
+  source:
+    repository:                  eugenmayer/concourse-docker-image-resource
+    tag:                         latest    
 ```
 
 ## Development
