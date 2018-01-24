@@ -1,0 +1,62 @@
+
+# Gopkg.toml example
+#
+# Refer to https://github.com/golang/dep/blob/master/docs/Gopkg.toml.md
+# for detailed Gopkg.toml documentation.
+#
+# required = ["github.com/user/thing/cmd/thing"]
+# ignored = ["github.com/user/project/pkgX", "bitbucket.org/user/project/pkgA/pkgY"]
+#
+# [[constraint]]
+#   name = "github.com/user/project"
+#   version = "1.0.0"
+#
+# [[constraint]]
+#   name = "github.com/user/project2"
+#   branch = "dev"
+#   source = "github.com/myfork/project2"
+#
+# [[override]]
+#  name = "github.com/x/y"
+#  version = "2.4.0"
+
+
+required = [
+    "github.com/awslabs/amazon-ecr-credential-helper/ecr-login/cmd"
+]
+
+[[constraint]]
+  name = "github.com/awslabs/amazon-ecr-credential-helper"
+  revision = "b689e22ad1e9142d4836ee15baa83d1b67d08c3d"
+
+[[constraint]]
+  name = "github.com/cihub/seelog"
+  revision = "a98235bd6d927ba8379ef4f0050c32c9a2ea17b8"
+
+[[constraint]]
+  name = "github.com/concourse/retryhttp"
+  revision = "dd24ee5a434d1b8a49cdbc194dce1e395e5a1d58"
+
+[[constraint]]
+  name = "github.com/docker/distribution"
+  revision = "4abae2ae560ba91db98779db2739eb97d7592fba"
+
+[[constraint]]
+  name = "github.com/hashicorp/go-multierror"
+  revision = "d30f09973e19c1dfcd120b2d9c4f168e68d6b5d5"
+
+[[constraint]]
+  name = "github.com/onsi/ginkgo"
+  revision = "09289bfe14b68884754576c1d8cd01c7f630b40b"
+
+[[constraint]]
+  name = "github.com/onsi/gomega"
+  revision = "9ed8da19f2156b87a803a8fdf6d126f627a12db1"
+
+[[constraint]]
+  name = "github.com/pivotal-golang/clock"
+  revision = "da8295109ceb031ff96dc126bb68d75dd9fddc4b"
+
+[[constraint]]
+  name = "github.com/pivotal-golang/lager"
+  revision = "7639e31ce6622c55c15aa64144b85d5f4873d127"
