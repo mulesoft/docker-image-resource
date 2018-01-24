@@ -1,0 +1,8 @@
+{
+  "name": "kube-dnsmasq-amd64-docker",
+  "source": {
+    "repository": "gcr.io/google_containers/kube-dnsmasq-amd64",
+    "tag": "1.3"
+  }
+}
+

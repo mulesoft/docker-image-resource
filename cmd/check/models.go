@@ -5,6 +5,7 @@ import "encoding/json"
 type Source struct {
 	Repository         string          `json:"repository"`
 	Tag                json.Number     `json:"tag"`
+	TagFilter          string          `json:"tag_filter"`
 	Username           string          `json:"username"`
 	Password           string          `json:"password"`
 	InsecureRegistries []string        `json:"insecure_registries"`
@@ -18,6 +19,7 @@ type Source struct {
 
 type Version struct {
 	Digest string `json:"digest"`
+	Tag    string `json:"tag"`
 }
 
 type CheckRequest struct {

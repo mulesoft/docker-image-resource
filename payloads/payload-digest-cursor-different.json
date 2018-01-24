@@ -1,0 +1,9 @@
+{
+  "name": "docker",
+  "source": {
+    "repository": "python"
+  },
+  "version": {
+      "digest": "sha256:8cb593cb9cd1834429f0b4953a25617a8457e2c79b3e111c0f70bffd21acc467"
+  }
+}

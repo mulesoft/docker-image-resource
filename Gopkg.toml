@@ -39,7 +39,7 @@ required = [
 
 [[constraint]]
   name = "github.com/docker/distribution"
-  revision = "4abae2ae560ba91db98779db2739eb97d7592fba"
+  version = "2.6.2"
 
 [[constraint]]
   name = "github.com/hashicorp/go-multierror"
@@ -47,11 +47,11 @@ required = [
 
 [[constraint]]
   name = "github.com/onsi/ginkgo"
-  revision = "09289bfe14b68884754576c1d8cd01c7f630b40b"
+  version = "1.4.0"
 
 [[constraint]]
   name = "github.com/onsi/gomega"
-  revision = "9ed8da19f2156b87a803a8fdf6d126f627a12db1"
+  version = "1.3.0"
 
 [[constraint]]
   name = "github.com/pivotal-golang/clock"
@@ -60,3 +60,10 @@ required = [
 [[constraint]]
   name = "github.com/pivotal-golang/lager"
   revision = "7639e31ce6622c55c15aa64144b85d5f4873d127"
+
+# Same setup that go/dep is using:
+# https://github.com/golang/dep/blob/master/Gopkg.toml
+[[constraint]]
+  branch = "parse-constraints-with-dash-in-pre"
+  name = "github.com/Masterminds/semver"
+  source = "https://github.com/carolynvs/semver.git"

@@ -1,21 +1,24 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/cihub/seelog"
 	"github.com/pivotal-golang/lager"
 
+	"github.com/Masterminds/semver"
 	ecr "github.com/awslabs/amazon-ecr-credential-helper/ecr-login"
 	ecrapi "github.com/awslabs/amazon-ecr-credential-helper/ecr-login/api"
 	"github.com/concourse/retryhttp"
@@ -24,8 +27,9 @@ import (
 	_ "github.com/docker/distribution/manifest/schema1"
 	_ "github.com/docker/distribution/manifest/schema2"
 	"github.com/docker/distribution/reference"
-	"github.com/docker/distribution/registry/api/v2"
+	"github.com/docker/distribution/registry/client"
 	"github.com/docker/distribution/registry/client/auth"
+	"github.com/docker/distribution/registry/client/auth/challenge"
 	"github.com/docker/distribution/registry/client/transport"
 	"github.com/hashicorp/go-multierror"
 	"github.com/pivotal-golang/clock"
@@ -62,88 +66,118 @@ func main() {
 		registryHost = registryMirrorUrl.Host
 	}
 
-	tag := request.Source.Tag.String()
-	if tag == "" {
-		tag = "latest"
-	}
-
 	transport, registryURL := makeTransport(logger, request, registryHost, repo)
-
-	client := &http.Client{
-		Transport: retryRoundTripper(logger, transport),
-	}
-
-	ub, err := v2.NewURLBuilderFromString(registryURL, false)
-	fatalIf("failed to construct registry URL builder", err)
 
 	namedRef, err := reference.WithName(repo)
 	fatalIf("failed to construct named reference", err)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	repository, err := client.NewRepository(ctx, namedRef, registryURL, retryRoundTripper(logger, transport))
+	fatalIf("failed to construct repository", err)
+
+	if request.Source.TagFilter != "" {
+		response := fetchTags(ctx, repository, request.Version, request.Source.TagFilter)
+		json.NewEncoder(os.Stdout).Encode(response)
+	} else {
+		tag := request.Source.Tag.String()
+		if tag == "" {
+			tag = "latest"
+		}
+		response := fetchTag(ctx, repository, request.Version, tag)
+		json.NewEncoder(os.Stdout).Encode(response)
+	}
+
+}
+
+func fetchTags(ctx context.Context, repo distribution.Repository, cursor Version, tagFilter string) CheckResponse {
+	var response CheckResponse
+	tagManager := repo.Tags(ctx)
+
+	tags, err := tagManager.All(ctx)
+	fatalIf("failed to retrieve tags", err)
+
+	var matchedTags []semver.Version
+
+	for _, tag := range tags {
+		matched, err := filepath.Match(tagFilter, tag)
+		fatalIf("failed to parse tag_filter", err)
+		if matched {
+			v, err := semver.NewVersion(tag)
+			fatalIf("failed to parse "+tag+" as semver", err)
+			matchedTags = append(matchedTags, v)
+		}
+	}
+
+	if len(matchedTags) == 0 {
+		return nil
+	}
+
+	// Newest is now first (note: concourse wants newest _last_ so beware)
+	sort.Sort(sort.Reverse(semver.Collection(matchedTags)))
+
+	// if we don't have a cursor, don't pull the entire history, just the
+	// newest, since that could be a lot (this matches the git-resource
+	// behavior); we'll copy from this index backwards to 0, inclusive, so this
+	// default means "take the newest only"
+	fromHere := 0
+	if cursor.Tag != "" {
+		for idx, ver := range matchedTags {
+			if ver.Original() == cursor.Tag {
+				fromHere = idx
+				break
+			}
+		}
+	}
+
+	// We iterate backwards intentionally to make sure the newest tag ends up
+	// last, the way concourse expects
+	for idx := fromHere; idx >= 0; idx-- {
+		tag := matchedTags[idx].Original()
+		descriptor, err := tagManager.Get(ctx, tag)
+		// No 404 check here because we won't tolerate failure.
+		fatalIf("failed to retrieve tag "+tag+" from repo", err)
+
+		response = append(response, Version{
+			Tag:    tag,
+			Digest: descriptor.Digest.String(),
+		})
+	}
+
+	return response
+}
+
+func fetchTag(ctx context.Context, repo distribution.Repository, cursor Version, tag string) CheckResponse {
 	var response CheckResponse
 
-	taggedRef, err := reference.WithTag(namedRef, tag)
-	fatalIf("failed to construct tagged reference", err)
+	tagManager := repo.Tags(ctx)
 
-	latestManifestURL, err := ub.BuildManifestURL(taggedRef)
-	fatalIf("failed to build latest manifest URL", err)
+	descriptor, err := tagManager.Get(ctx, tag)
+	foundLatest, err := isFound(err)
+	fatalIf("failed to retrieve tag from repo", err)
 
-	latestDigest, foundLatest := fetchDigest(client, latestManifestURL)
+	latestDigest := descriptor.Digest
 
-	if request.Version.Digest != "" {
-		digestRef, err := reference.WithDigest(namedRef, digest.Digest(request.Version.Digest))
-		fatalIf("failed to build cursor manifest URL", err)
+	if cursor.Digest != "" {
+		cursorDigest, err := digest.ParseDigest(cursor.Digest)
+		fatalIf("failed to parse cursor digest", err)
 
-		cursorManifestURL, err := ub.BuildManifestURL(digestRef)
-		fatalIf("failed to build manifest URL", err)
+		manifestManager, err := repo.Manifests(ctx, client.ReturnContentDigest(&cursorDigest))
+		fatalIf("failed to make manifest service", err)
 
-		cursorDigest, foundCursor := fetchDigest(client, cursorManifestURL)
+		foundCursor, err := manifestManager.Exists(ctx, cursorDigest)
+		fatalIf("failed to check if cursor exists", err)
 
 		if foundCursor && cursorDigest != latestDigest {
-			response = append(response, Version{cursorDigest})
+			response = append(response, Version{Digest: cursorDigest.String()})
 		}
 	}
 
 	if foundLatest {
-		response = append(response, Version{latestDigest})
+		response = append(response, Version{Digest: latestDigest.String()})
 	}
-
-	json.NewEncoder(os.Stdout).Encode(response)
-}
-
-func fetchDigest(client *http.Client, manifestURL string) (string, bool) {
-	manifestRequest, err := http.NewRequest("GET", manifestURL, nil)
-	fatalIf("failed to build manifest request", err)
-	manifestRequest.Header.Add("Accept", "application/vnd.docker.distribution.manifest.v2+json")
-	manifestRequest.Header.Add("Accept", "application/vnd.docker.distribution.manifest.v1+prettyjws")
-	manifestRequest.Header.Add("Accept", "application/json")
-
-	manifestResponse, err := client.Do(manifestRequest)
-	fatalIf("failed to fetch manifest", err)
-
-	defer manifestResponse.Body.Close()
-
-	if manifestResponse.StatusCode == http.StatusNotFound {
-		return "", false
-	}
-
-	if manifestResponse.StatusCode != http.StatusOK {
-		fatal("failed to fetch digest: " + manifestResponse.Status)
-	}
-
-	digest := manifestResponse.Header.Get("Docker-Content-Digest")
-	if digest == "" {
-		ctHeader := manifestResponse.Header.Get("Content-Type")
-
-		bytes, err := ioutil.ReadAll(manifestResponse.Body)
-		fatalIf("failed to read response body", err)
-
-		_, desc, err := distribution.UnmarshalManifest(ctHeader, bytes)
-		fatalIf("failed to unmarshal manifest", err)
-
-		digest = string(desc.Digest)
-	}
-
-	return digest, true
+	return response
 }
 
 func makeTransport(logger lager.Logger, request CheckRequest, registryHost string, repository string) (http.RoundTripper, string) {
@@ -194,10 +228,10 @@ func makeTransport(logger lager.Logger, request CheckRequest, registryHost strin
 
 	pingClient := &http.Client{
 		Transport: retryRoundTripper(logger, authTransport),
-		Timeout: 1 * time.Minute,
+		Timeout:   1 * time.Minute,
 	}
 
-	challengeManager := auth.NewSimpleChallengeManager()
+	challengeManager := challenge.NewSimpleManager()
 
 	var registryURL string
 
@@ -326,4 +360,16 @@ func setClientCert(registry string, list []ClientCertKey) []tls.Certificate {
 		}
 	}
 	return clientCert
+}
+
+func isFound(err error) (bool, error) {
+	// 404s aren't fatal, but docker doesn't give us a great way to detect
+	// them...
+	if err == nil {
+		return true, nil
+	} else if strings.Contains(err.Error(), "manifest unknown") {
+		return false, nil
+	} else {
+		return false, err
+	}
 }

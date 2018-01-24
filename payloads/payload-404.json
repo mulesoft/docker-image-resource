@@ -1,0 +1,7 @@
+{
+  "name": "docker",
+  "source": {
+    "repository": "python",
+    "tag": "this-version-does-not-exist"
+  }
+}

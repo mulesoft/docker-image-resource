@@ -1,0 +1,7 @@
+{
+  "name": "docker",
+  "source": {
+    "repository": "python",
+    "tag_filter": "2.7.*-alpine"
+  }
+}

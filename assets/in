@@ -6,7 +6,7 @@ set -e
 exec 3>&1 # make stdout available as fd 3 for the result
 exec 1>&2 # redirect all output to stderr for logging
 
-source $(dirname $0)/common.sh
+. $(dirname $0)/common.sh
 
 destination=$1
 
@@ -45,7 +45,8 @@ else
   registry=
 fi
 
-digest="$(jq -r '.version.digest' < $payload)"
+request_digest="$(jq -r '.version.digest' < $payload)"
+request_tag="$(jq -r '.version.tag // ""' < $payload)"
 
 rootfs="$(jq -r '.params.rootfs // false' < $payload)"
 skip_download="$(jq -r '.params.skip_download // false' < $payload)"
@@ -61,7 +62,12 @@ start_docker \
 
 mkdir -p $destination
 
-image_name="${repository}@${digest}"
+if [ -n "$request_tag" ]; then
+  image_name="${repository}:${request_tag}"
+else
+  image_name="${repository}@${request_digest}"
+fi
+
 
 if [ "$skip_download" = "false" ]; then
   log_in "$username" "$password" "$registry"
@@ -73,7 +79,15 @@ if [ "$skip_download" = "false" ]; then
     docker save -o ${destination}/image "$image_name"
   fi
 
-  image_id="$(image_from_digest "$repository" "$digest")"
+  if [ -n "$request_tag" ]; then
+    image_id_from_tag="$(image_from_tag "$repository" "$request_tag")"
+  fi
+
+  image_id="$(image_from_digest "$repository" "$request_digest")"
+  if [ -n "$image_id_from_tag" ] && [ "$image_id_from_tag" != "$image_id" ]; then
+    echo "image_id from tag and digest do not match!"
+    exit 1
+  fi
 
   echo "$image_id" > ${destination}/image-id
   docker inspect $image_id > ${destination}/docker_inspect.json
@@ -93,12 +107,20 @@ if [ "$skip_download" = "false" ]; then
 fi
 
 echo "$repository" > ${destination}/repository
-echo "$tag" > ${destination}/tag
-echo "$digest" > ${destination}/digest
+
+if [ -n "$request_tag" ]; then
+  echo "$request_tag" > ${destination}/tag
+else
+  echo "$tag" > ${destination}/tag
+fi
+
+echo "$request_digest" > ${destination}/digest
+
 
 jq -n "{
   version: {
-    digest: $(echo $digest | jq -R .)
+    digest: $(echo $request_digest | jq -R .),
+    tag: $(echo $request_tag | jq -R .)
   },
   metadata: [
     { name: \"image\", value: $(echo $image_id | head -c 12 | jq -R .) }
