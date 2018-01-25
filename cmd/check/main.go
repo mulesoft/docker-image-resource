@@ -36,13 +36,26 @@ import (
 )
 
 func main() {
-	logger := lager.NewLogger("http")
-
-	logger.RegisterSink(lager.NewWriterSink(os.Stderr, lager.DEBUG))
+	logger := lager.NewLogger("docker-image-resource")
 
 	var request CheckRequest
 	err := json.NewDecoder(os.Stdin).Decode(&request)
 	fatalIf("failed to read request", err)
+
+	var logLevel lager.LogLevel
+	switch request.Source.LogLevel {
+	case "debug":
+		logLevel = lager.DEBUG
+	case "error":
+		logLevel = lager.ERROR
+	case "fatal":
+		logLevel = lager.FATAL
+	default:
+		logLevel = lager.INFO
+	}
+
+	logger.RegisterSink(lager.NewWriterSink(os.Stderr, logLevel))
+	logger.Debug("starting up")
 
 	os.Setenv("AWS_ACCESS_KEY_ID", request.Source.AWSAccessKeyID)
 	os.Setenv("AWS_SECRET_ACCESS_KEY", request.Source.AWSSecretAccessKey)
@@ -74,24 +87,28 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	logger.Debug("constructing repository object")
 	repository, err := client.NewRepository(ctx, namedRef, registryURL, retryRoundTripper(logger, transport))
 	fatalIf("failed to construct repository", err)
 
+	var response CheckResponse
 	if request.Source.TagFilter != "" {
-		response := fetchTags(ctx, repository, request.Version, request.Source.TagFilter)
-		json.NewEncoder(os.Stdout).Encode(response)
+		response = fetchTags(ctx, logger.Session("tag-filter"), repository, request.Version, request.Source.TagFilter)
 	} else {
 		tag := request.Source.Tag.String()
 		if tag == "" {
 			tag = "latest"
 		}
-		response := fetchTag(ctx, repository, request.Version, tag)
-		json.NewEncoder(os.Stdout).Encode(response)
+		response = fetchTag(ctx, logger.Session("tag-get"), repository, request.Version, tag)
 	}
 
+	logger.Debug("encoding json")
+	json.NewEncoder(os.Stdout).Encode(response)
+	logger.Debug("done")
 }
 
-func fetchTags(ctx context.Context, repo distribution.Repository, cursor Version, tagFilter string) CheckResponse {
+func fetchTags(ctx context.Context, logger lager.Logger, repo distribution.Repository, cursor Version, tagFilter string) CheckResponse {
+	logger.Debug("starting tag filter")
 	var response CheckResponse
 	tagManager := repo.Tags(ctx)
 
@@ -100,20 +117,28 @@ func fetchTags(ctx context.Context, repo distribution.Repository, cursor Version
 
 	var matchedTags []semver.Version
 
+	logger.Debug("filtering tags")
+
 	for _, tag := range tags {
 		matched, err := filepath.Match(tagFilter, tag)
 		fatalIf("failed to parse tag_filter", err)
 		if matched {
 			v, err := semver.NewVersion(tag)
-			fatalIf("failed to parse "+tag+" as semver", err)
-			matchedTags = append(matchedTags, v)
+			// Ignore tags that don't meet semver
+			if err == nil {
+				matchedTags = append(matchedTags, v)
+			} else {
+				logger.Error("ignoring non-semver tag", err, lager.Data{"tag": tag})
+			}
 		}
 	}
 
 	if len(matchedTags) == 0 {
+		logger.Info("no tags matched")
 		return nil
 	}
 
+	logger.Debug("sorting tags", lager.Data{"count": len(matchedTags)})
 	// Newest is now first (note: concourse wants newest _last_ so beware)
 	sort.Sort(sort.Reverse(semver.Collection(matchedTags)))
 
@@ -123,14 +148,17 @@ func fetchTags(ctx context.Context, repo distribution.Repository, cursor Version
 	// default means "take the newest only"
 	fromHere := 0
 	if cursor.Tag != "" {
+		logger.Debug("finding cursor in matches")
 		for idx, ver := range matchedTags {
 			if ver.Original() == cursor.Tag {
 				fromHere = idx
+				logger.Debug("found cursor in matches", lager.Data{"idx": idx})
 				break
 			}
 		}
 	}
 
+	logger.Debug("looking up new tags", lager.Data{"count": fromHere + 1})
 	// We iterate backwards intentionally to make sure the newest tag ends up
 	// last, the way concourse expects
 	for idx := fromHere; idx >= 0; idx-- {
@@ -145,10 +173,11 @@ func fetchTags(ctx context.Context, repo distribution.Repository, cursor Version
 		})
 	}
 
+	logger.Debug("tag filter done")
 	return response
 }
 
-func fetchTag(ctx context.Context, repo distribution.Repository, cursor Version, tag string) CheckResponse {
+func fetchTag(ctx context.Context, logger lager.Logger, repo distribution.Repository, cursor Version, tag string) CheckResponse {
 	var response CheckResponse
 
 	tagManager := repo.Tags(ctx)
