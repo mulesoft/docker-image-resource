@@ -165,7 +165,7 @@ func fetchTags(ctx context.Context, logger lager.Logger, repo distribution.Repos
 		tag := matchedTags[idx].Original()
 		descriptor, err := tagManager.Get(ctx, tag)
 		// No 404 check here because we won't tolerate failure.
-		fatalIf("failed to retrieve tag "+tag+" from repo", err)
+		fatalIf("[iter] failed to retrieve tag "+tag+" from repo", err)
 
 		response = append(response, Version{
 			Tag:    tag,
@@ -184,7 +184,7 @@ func fetchTag(ctx context.Context, logger lager.Logger, repo distribution.Reposi
 
 	descriptor, err := tagManager.Get(ctx, tag)
 	foundLatest, err := isFound(err)
-	fatalIf("failed to retrieve tag from repo", err)
+	fatalIf("[single] failed to retrieve tag "+tag+" from repo", err)
 
 	latestDigest := descriptor.Digest
 
